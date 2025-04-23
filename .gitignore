@@ -1,0 +1,28 @@
+# Build output and distribution artifacts
+build/
+dist/
+
+# Go build cache and binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go workspace file
+go.work
+
+# IDE/editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.bak
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Go module/vendor
+vendor/

@@ -1,0 +1,8 @@
+activate: app1
+apps:
+  app1:
+    path: C:\Path\To\App1.exe
+    args: []
+  app2:
+    path: D:\Another\App2.exe
+    args: ["-flag"]
