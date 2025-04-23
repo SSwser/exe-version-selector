@@ -18,9 +18,6 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Set up PowerShell
-        uses: potatoqualitee/psmodulecache@v6
-
       - name: Run build script
         shell: pwsh
         run: scripts/build.ps1
