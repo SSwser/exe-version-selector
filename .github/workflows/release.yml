@@ -28,8 +28,6 @@ jobs:
       - name: Upload Release Artifacts
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            build/evs.exe
-            build/evs-console.exe
+          files: dist/evs_*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
