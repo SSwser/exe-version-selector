@@ -15,9 +15,15 @@ import (
 )
 
 // 处理打开目录菜单项的点击
-func openDirHandler(cfg *Config, app App) {
+func openDirHandler(cfg *Config) {
 	go func() {
 		for range menuOpenDir.ClickedCh {
+			// 每次点击都实时获取当前激活应用的路径
+			app, ok := cfg.Apps[cfg.Activate]
+			if !ok {
+				showError("未找到当前激活应用")
+				continue
+			}
 			dir := app.Path
 			if idx := strings.LastIndexAny(dir, "\\/"); idx != -1 {
 				dir = dir[:idx]
@@ -43,6 +49,7 @@ type App struct {
 type Config struct {
 	Activate string         `yaml:"activate"`
 	Apps     map[string]App `yaml:"apps"`
+	AppOrder []string       `yaml:"-"` // 不写入 yaml，仅用于顺序
 }
 
 const configFile = "config.yaml"
@@ -80,7 +87,36 @@ func loadConfig() (*Config, error) {
 	if cfg.Apps == nil {
 		cfg.Apps = make(map[string]App)
 	}
+
+	cfg.AppOrder = parseAppOrderNode(data)
+
 	return &cfg, nil
+}
+
+// parseAppOrderNode 通过 yaml.v3 解析节点，严格保持 apps 字段顺序
+func parseAppOrderNode(yamlData []byte) []string {
+	var root yaml.Node
+	yaml.Unmarshal(yamlData, &root)
+	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 {
+		return nil
+	}
+	// 找到 apps 字段
+	m := root.Content[0]
+	for i := 0; i < len(m.Content)-1; i += 2 {
+		key := m.Content[i]
+		if key.Value == "apps" {
+			appsNode := m.Content[i+1]
+			if appsNode.Kind == yaml.MappingNode {
+				order := make([]string, 0, len(appsNode.Content)/2)
+				for j := 0; j < len(appsNode.Content)-1; j += 2 {
+					name := appsNode.Content[j].Value
+					order = append(order, name)
+				}
+				return order
+			}
+		}
+	}
+	return nil
 }
 
 func saveConfig(cfg *Config) error {
@@ -288,7 +324,7 @@ func onReady(cfg *Config, app App, allArgs []string) {
 
 	// 添加“打开目录”菜单项（全局变量）
 	menuOpenDir = systray.AddMenuItem("打开目录", "在文件资源管理器中打开当前应用所在文件夹")
-	go openDirHandler(cfg, app)
+	go openDirHandler(cfg)
 
 	systray.AddSeparator()
 
@@ -409,13 +445,6 @@ func runApp(cfg *Config, extraArgs []string) {
 				menuArgs.SetTitle(fmt.Sprintf("参数: %s", strings.Join(allArgsNew, " ")))
 			}
 
-			// 重新创建“打开目录”菜单项，确保切换后指向新应用
-			if menuOpenDir != nil {
-				menuOpenDir.Hide()
-			}
-			menuOpenDir = systray.AddMenuItem("打开目录", "在文件资源管理器中打开当前应用所在文件夹")
-			go openDirHandler(cfg, appNew)
-
 			// 更新切换应用子菜单的 Checked 状态
 			for i, name := range getAppNames(cfg) {
 				if name == cfg.Activate {
@@ -466,13 +495,9 @@ func printHelp() {
 	fmt.Println("\n如果不指定命令，将直接运行当前选中的应用")
 }
 
-// 返回所有应用名，顺序与 menuSwitchSubs 保持一致
+// 返回所有应用名，顺序与 config.yaml apps 字段顺序一致
 func getAppNames(cfg *Config) []string {
-	names := make([]string, 0, len(cfg.Apps))
-	for name := range cfg.Apps {
-		names = append(names, name)
-	}
-	return names
+	return cfg.AppOrder
 }
 
 func main() {
