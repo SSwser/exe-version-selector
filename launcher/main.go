@@ -22,22 +22,6 @@ var menuSwitch *systray.MenuItem
 var evsProcess *os.Process // 仅 launcher 启动的 evs.exe 子进程
 
 func trayOnReady() {
-	// 菜单分组配置
-	menuConfig := []internal.MenuConfig{
-		{
-			Title:   "启动/重启",
-			Tooltip: "运行或重启当前激活的应用",
-			OnClick: func(item *systray.MenuItem) {
-				status := trayGetStatus()
-				if status == internal.AppRunning {
-					restartAppRemote()
-				} else {
-					trayRunApp()
-				}
-			},
-		},
-	}
-
 	// 设置托盘图标
 	icon, err := os.ReadFile("resources/icon.ico")
 	if err == nil {
@@ -61,6 +45,8 @@ func trayOnReady() {
 
 	systray.AddSeparator()
 
+	openDirItem := systray.AddMenuItem("打开目录", "在文件资源管理器中打开当前应用所在文件夹")
+
 	// 动态“切换应用”菜单
 	menuSwitch = systray.AddMenuItem("切换到", "切换到其他应用")
 	buildSwitchSubMenus()
@@ -82,13 +68,26 @@ func trayOnReady() {
 		menuStatus.SetTitle(status.String())
 	})
 
-	// 递归生成所有菜单，并捕获启动/重启菜单项指针
-	var startRestartItem *systray.MenuItem
-	if len(menuConfig) > 0 {
-		startRestartItem = internal.CreateMenuFromConfig(menuConfig[0])
+	// 菜单分组配置
+	menuConfig := []internal.MenuConfig{
+		{
+			Title:   "启动 / 重启",
+			Tooltip: "运行或重启当前激活的应用",
+			OnClick: func(item *systray.MenuItem) {
+				status := trayGetStatus()
+				if status == internal.AppRunning {
+					restartAppRemote()
+				} else {
+					trayRunApp()
+				}
+			},
+		},
 	}
 
-	openDirItem := systray.AddMenuItem("打开目录", "在文件资源管理器中打开当前应用所在文件夹")
+	// 递归生成所有菜单
+	internal.CreateMenuFromConfig(menuConfig[0])
+
+	closeAppItem := systray.AddMenuItem("关闭", "远程关闭当前激活应用")
 
 	systray.AddSeparator()
 
@@ -96,6 +95,12 @@ func trayOnReady() {
 	reloadConfigItem := systray.AddMenuItem("重载配置", "重新加载 config.yaml")
 	exitItem := systray.AddMenuItem("退出", "退出应用")
 
+	go func() {
+		for {
+			<-closeAppItem.ClickedCh
+			traySendCommand("stop")
+		}
+	}()
 	go func() {
 		for {
 			<-openDirItem.ClickedCh
@@ -123,16 +128,6 @@ func trayOnReady() {
 		path.SetTitle(fmt.Sprintf("路径: %s", p))
 		args.SetTitle(fmt.Sprintf("参数: %s", a))
 
-		appStatus := trayGetStatus()
-		if startRestartItem != nil {
-			if appStatus == internal.AppRunning {
-				startRestartItem.SetTitle("重启应用")
-				startRestartItem.SetTooltip("关闭并重启当前激活应用")
-			} else {
-				startRestartItem.SetTitle("启动应用")
-				startRestartItem.SetTooltip("运行当前激活的应用")
-			}
-		}
 	})
 	internal.RegisterMenuRefresher(func() {
 		internal.UpdateTrayTitle(trayGetActivate())

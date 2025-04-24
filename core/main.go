@@ -238,6 +238,13 @@ func handleConsoleConn(conn net.Conn, configPath string) {
 		_ = killCurrentApp()
 		go runAppProxy(nil)
 		conn.Write([]byte("OK\n"))
+	case "stop":
+		err := killCurrentApp()
+		if err == nil {
+			conn.Write([]byte("OK\n"))
+		} else {
+			conn.Write([]byte("ERR kill failed\n"))
+		}
 	default:
 		conn.Write([]byte("ERR unknown command\n"))
 	}
