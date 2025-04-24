@@ -5,14 +5,7 @@ import (
 	"strings"
 )
 
-// 应用状态枚举和解析
-
-// AppStatus 表示应用运行状态
-// 注意：如需扩展请统一维护字符串常量
-
-// 状态类型
-// 用于托盘菜单、主程序等统一判断
-
+// AppStatus 表示应用运行状态，用于托盘菜单、主程序等统一判断
 type AppStatus int
 
 func (a AppStatus) String() string {
@@ -57,16 +50,25 @@ func ParseAppStatus(status string) AppStatus {
 	}
 }
 
-
-
 // 示例公共业务逻辑（需根据 main.go 实际内容完善）
-func ListApps(cfg *Config) { // cfg 类型引用 internal/config.go 的 Config
+func ListApps(cfg *Config) {
+	// 先计算所有 name 的最大宽度
+	maxNameLen := 0
+	for _, name := range cfg.AppOrder {
+		if l := DisplayWidth(name); l > maxNameLen {
+			maxNameLen = l
+		}
+	}
 	for _, name := range cfg.AppOrder {
 		app := cfg.Apps[name]
-		fmt.Printf("%-16s %s %v\n", name, app.Path, app.Args)
+		marker := "   "
+		if name == cfg.Activate {
+			marker = "[*]"
+		}
+		pad := maxNameLen - DisplayWidth(name)
+		fmt.Printf("%s %s%s  %s %v\n", marker, name, Spaces(pad), app.Path, app.Args)
 	}
 }
-
 func AddApp(cfg *Config, args []string) {
 	if len(args) < 2 {
 		fmt.Println("用法: add <name> <path> [args...]")
