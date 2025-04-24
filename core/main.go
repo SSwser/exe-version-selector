@@ -23,8 +23,9 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
-	"exe-version-selector/internal"
+	"github.com/SSwser/exe-version-selector/internal"
 )
 
 var configPath = "config.yaml" // 全局可用
@@ -146,7 +147,6 @@ func runAppProxy(args []string) {
 		fmt.Printf("启动应用失败: %v\n", err)
 		return
 	}
-	// running 状态由回调设置
 }
 
 // 关闭当前启动的应用进程
@@ -195,6 +195,17 @@ func handleConsoleConn(conn net.Conn, configPath string) {
 		return
 	}
 	switch args[0] {
+	case "exit":
+		conn.Write([]byte("OK\n"))
+		go func() {
+			if currentAppPid != 0 {
+				_ = internal.KillProcessTree(currentAppPid)
+				currentAppPid = 0
+			}
+			time.Sleep(50 * time.Millisecond)
+			os.Exit(0)
+		}()
+		return
 	case "apporder":
 		cfg, _ := internal.LoadConfig(configPath)
 		fmt.Fprintf(os.Stderr, "[SOCKET] 收到 apporder, AppOrder=%v\n", cfg.AppOrder)
@@ -235,9 +246,22 @@ func handleConsoleConn(conn net.Conn, configPath string) {
 		// 重新加载配置（此处为占位，实际已每次操作自动加载）
 		conn.Write([]byte("OK\n"))
 	case "restart":
-		_ = killCurrentApp()
+		oldPid := currentAppPid // 记录旧 PID
+		err := killCurrentApp()
+		if err == nil && oldPid != 0 {
+			// 轮询确认进程树已完全退出，最多等 4 秒
+			for i := 0; i < 40; i++ {
+				if !internal.IsProcessTreeAlive(oldPid) {
+					fmt.Printf("[restart] 旧进程及其子进程已完全退出\n", oldPid)
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+		fmt.Println("[restart] 启动新进程...")
 		go runAppProxy(nil)
 		conn.Write([]byte("OK\n"))
+		return
 	case "stop":
 		err := killCurrentApp()
 		if err == nil {

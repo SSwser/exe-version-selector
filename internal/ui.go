@@ -8,6 +8,9 @@ import (
 	"github.com/getlantern/systray"
 )
 
+// 用于定时刷新所有注册的菜单项内容,支持统一刷新所有菜单项
+var menuRefreshers []func()
+
 // 通用菜单结构体
 // OnClick, OnRefresh 可为 nil
 // SubMenus 支持分组和递归
@@ -20,11 +23,20 @@ type MenuConfig struct {
 	OnRefresh func(item *systray.MenuItem)
 	SubMenus  []MenuConfig
 	Extra     map[string]interface{}
+	Separator bool // 是否在此项下添加分隔符
 }
 
 // 递归生成菜单分组并注册事件
 func CreateMenuFromConfig(cfg MenuConfig) *systray.MenuItem {
 	item := systray.AddMenuItem(cfg.Title, cfg.Tooltip)
+
+	// 禁用支持
+	if cfg.Extra != nil {
+		if disable, ok := cfg.Extra["disable"]; ok && disable == true {
+			item.Disable()
+		}
+	}
+
 	if cfg.OnClick != nil {
 		go func() {
 			for {
@@ -33,8 +45,14 @@ func CreateMenuFromConfig(cfg MenuConfig) *systray.MenuItem {
 			}
 		}()
 	}
+
 	for _, sub := range cfg.SubMenus {
 		subItem := item.AddSubMenuItem(sub.Title, sub.Tooltip)
+		if sub.Extra != nil {
+			if disable, ok := sub.Extra["disable"]; ok && disable == true {
+				subItem.Disable()
+			}
+		}
 		if sub.OnClick != nil {
 			go func(s *systray.MenuItem, handler func(*systray.MenuItem)) {
 				for {
@@ -43,12 +61,18 @@ func CreateMenuFromConfig(cfg MenuConfig) *systray.MenuItem {
 				}
 			}(subItem, sub.OnClick)
 		}
+
 		// 递归子菜单
 		if len(sub.SubMenus) > 0 {
-			// 注意：递归生成子菜单
 			CreateMenuFromConfigRecursive(subItem, sub)
 		}
 	}
+
+	// 如果 Separator 为真，则在此项下添加分隔符
+	if cfg.Separator {
+		systray.AddSeparator()
+	}
+
 	return item
 }
 
@@ -67,12 +91,11 @@ func CreateMenuFromConfigRecursive(parent *systray.MenuItem, cfg MenuConfig) {
 		if len(sub.SubMenus) > 0 {
 			CreateMenuFromConfigRecursive(subItem, sub)
 		}
+		if sub.Separator {
+			systray.AddSeparator()
+		}
 	}
 }
-
-// 支持统一刷新所有菜单项
-// 用于定时刷新所有注册的菜单项内容
-var menuRefreshers []func()
 
 func RegisterMenuRefresher(f func()) {
 	menuRefreshers = append(menuRefreshers, f)
@@ -92,7 +115,9 @@ func StartMenuRefresher() {
 // 标题和 tooltip 刷新复用
 func UpdateTrayTitle(current string) {
 	systray.SetTitle("EVS: " + current)
-	systray.SetTooltip("当前应用: " + current)
+	// Windows 下频繁 SetTooltip 可能报错，可选择注释掉或捕获异常
+	defer func() { _ = recover() }()
+	// systray.SetTooltip("当前应用: " + current) // 避免 Windows 报错
 }
 
 // 显示错误信息

@@ -36,7 +36,8 @@ func KillProcessTree(pid int) error {
 	return nil
 }
 
-// 终止进程树并等待彻底退出
+// 终止进程树并等待主进程彻底退出（注意：只检测主进程存活，可能有子进程残留）
+// 推荐结合 IsProcessTreeAlive 检查进程树是否完全退出
 func KillProcessTreeAndWait(pid int) error {
 	err := KillProcessTree(pid)
 	if err == nil {
@@ -53,6 +54,7 @@ func KillProcessTreeAndWait(pid int) error {
 	}
 	return err
 }
+
 
 // 启动应用进程并异步监控退出，所有状态通过回调返回
 func StartAppProcess(path string, args []string, onStatus func(status string, pid int, exitErr error)) (int, error) {
@@ -167,4 +169,43 @@ func CommandLineToArgv(cmd string) ([]string, error) {
 		args = append(args, syscall.UTF16ToString((*[1 << 16]uint16)(unsafe.Pointer(p))[:]))
 	}
 	return args, nil
+}
+
+// FindAllDescendantPids 递归查找所有子进程 PID（含自身）
+type wmiProcTree struct {
+	ProcessId       uint32  `wmi:"ProcessId"`
+	ParentProcessId uint32  `wmi:"ParentProcessId"`
+}
+
+func FindAllDescendantPids(rootPid int) []int {
+	var procs []wmiProcTree
+	_ = wmi.Query("SELECT ProcessId, ParentProcessId FROM Win32_Process", &procs)
+	pidSet := map[int]struct{}{rootPid: {}}
+	changed := true
+	for changed {
+		changed = false
+		for _, p := range procs {
+			if _, ok := pidSet[int(p.ParentProcessId)]; ok {
+				if _, exist := pidSet[int(p.ProcessId)]; !exist {
+					pidSet[int(p.ProcessId)] = struct{}{}
+					changed = true
+				}
+			}
+		}
+	}
+	var pids []int
+	for pid := range pidSet {
+		pids = append(pids, pid)
+	}
+	return pids
+}
+
+// IsProcessTreeAlive 检查进程树是否有存活
+func IsProcessTreeAlive(rootPid int) bool {
+	for _, pid := range FindAllDescendantPids(rootPid) {
+		if IsProcessAlive(pid) {
+			return true
+		}
+	}
+	return false
 }

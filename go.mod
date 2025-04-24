@@ -1,4 +1,4 @@
-module exe-version-selector
+module github.com/SSwser/exe-version-selector
 
 go 1.21
 
