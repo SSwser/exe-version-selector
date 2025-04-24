@@ -8,7 +8,7 @@ build_dir:
 	@if [ ! -d $(BUILD_DIR)/resources ]; then mkdir -p $(BUILD_DIR)/resources; fi
 
 clean:
-	rm -rf $(BUILD_DIR)/*.exe $(BUILD_DIR)/config.yaml $(BUILD_DIR)/resources
+	rm -rf $(BUILD_DIR)/*
 
 copy_resources: build_dir
 	cp -f config.yaml $(BUILD_DIR)/config.yaml
