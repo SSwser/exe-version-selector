@@ -36,7 +36,7 @@ func trayOnReady() {
 			OnRefresh: func(item *systray.MenuItem) {
 				item.SetTitle("[状态] " + command.GetAppStatus().String())
 			},
-			Extra:     map[string]interface{}{"disable": true},
+			Disable:   true,
 			Separator: true,
 		},
 		{
@@ -45,7 +45,7 @@ func trayOnReady() {
 			OnRefresh: func(item *systray.MenuItem) {
 				item.SetTitle("应用: " + command.GetActivate())
 			},
-			Extra: map[string]interface{}{"disable": true},
+			Disable: true,
 		},
 		{
 			Title:   "路径: ",
@@ -54,7 +54,7 @@ func trayOnReady() {
 				p, _ := command.GetCurrentAppPathArgs()
 				item.SetTitle("路径: " + p)
 			},
-			Extra: map[string]interface{}{"disable": true},
+			Disable: true,
 		},
 		{
 			Title:   "参数: ",
@@ -63,7 +63,7 @@ func trayOnReady() {
 				_, a := command.GetCurrentAppPathArgs()
 				item.SetTitle("参数: " + a)
 			},
-			Extra:     map[string]interface{}{"disable": true},
+			Disable:   true,
 			Separator: true,
 		},
 		{

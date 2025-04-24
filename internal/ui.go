@@ -14,7 +14,6 @@ var menuRefreshers []func()
 // 通用菜单结构体
 // OnClick, OnRefresh 可为 nil
 // SubMenus 支持分组和递归
-// Extra 可用于传递自定义数据
 
 type MenuConfig struct {
 	Title     string
@@ -22,7 +21,7 @@ type MenuConfig struct {
 	OnClick   func(item *systray.MenuItem)
 	OnRefresh func(item *systray.MenuItem)
 	SubMenus  []MenuConfig
-	Extra     map[string]interface{}
+	Disable   bool // 是否禁用此项
 	Separator bool // 是否在此项下添加分隔符
 }
 
@@ -31,10 +30,8 @@ func CreateMenuFromConfig(cfg MenuConfig) *systray.MenuItem {
 	item := systray.AddMenuItem(cfg.Title, cfg.Tooltip)
 
 	// 禁用支持
-	if cfg.Extra != nil {
-		if disable, ok := cfg.Extra["disable"]; ok && disable == true {
-			item.Disable()
-		}
+	if cfg.Disable {
+		item.Disable()
 	}
 
 	if cfg.OnClick != nil {
@@ -48,10 +45,8 @@ func CreateMenuFromConfig(cfg MenuConfig) *systray.MenuItem {
 
 	for _, sub := range cfg.SubMenus {
 		subItem := item.AddSubMenuItem(sub.Title, sub.Tooltip)
-		if sub.Extra != nil {
-			if disable, ok := sub.Extra["disable"]; ok && disable == true {
-				subItem.Disable()
-			}
+		if sub.Disable {
+			subItem.Disable()
 		}
 		if sub.OnClick != nil {
 			go func(s *systray.MenuItem, handler func(*systray.MenuItem)) {
