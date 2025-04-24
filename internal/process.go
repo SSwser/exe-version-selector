@@ -29,6 +29,7 @@ func IsProcessAlive(pid int) bool {
 // 终止进程树
 func KillProcessTree(pid int) error {
 	cmd := exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", pid))
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true} // 隐藏控制台窗口
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("终止进程树失败: %v, 输出: %s", err, output)

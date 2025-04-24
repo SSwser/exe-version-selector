@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/SSwser/exe-version-selector/internal"
@@ -125,6 +126,7 @@ func RunApp() {
 			return
 		}
 		cmd := exec.Command(absPath)
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true} // 隐藏控制台窗口
 		cmd.Dir = "."
 		err2 := cmd.Start()
 		if err2 == nil {
