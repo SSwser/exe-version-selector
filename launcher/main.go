@@ -20,6 +20,7 @@ var switchNames []string
 var menuSwitch *systray.MenuItem
 
 var evsProcess *os.Process // 仅 launcher 启动的 evs.exe 子进程
+
 func trayOnReady() {
 	// 菜单分组配置
 	menuConfig := []internal.MenuConfig{
@@ -140,7 +141,6 @@ func trayOnReady() {
 }
 
 // 获取当前激活应用的路径和参数
-// 通用 socket 命令工具
 func traySendCommand(cmd string) (string, error) {
 	conn, err := net.Dial("tcp", "127.0.0.1:50505")
 	if err != nil {
@@ -277,27 +277,29 @@ func trayGetActivate() string {
 }
 
 func trayOnExit() {
-	if evsProcess != nil {
-		err := evsProcess.Signal(os.Interrupt)
+	if evsProcess == nil {
+		return
+	}
+
+	err := evsProcess.Signal(os.Interrupt)
+	if err != nil {
+		fmt.Printf("[trayOnExit] 发送 Interrupt 信号失败: %v\n", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, werr := evsProcess.Wait()
+		done <- werr
+	}()
+	select {
+	case <-done:
+		// evs.exe 已退出
+	case <-time.After(3 * time.Second):
+		// 超时后强制 kill 进程树，保证代理 app 一起退出
+		err := internal.KillProcessTree(evsProcess.Pid)
 		if err != nil {
-			fmt.Printf("[trayOnExit] 发送 Interrupt 信号失败: %v\n", err)
-		}
-		done := make(chan error, 1)
-		go func() {
-			_, werr := evsProcess.Wait()
-			done <- werr
-		}()
-		select {
-		case <-done:
-			// evs.exe 已退出
-		case <-time.After(3 * time.Second):
-			// 超时后强制 kill 进程树，保证代理 app 一起退出
-			err := internal.KillProcessTree(evsProcess.Pid)
-			if err != nil {
-				fmt.Printf("[trayOnExit] 强制 kill evs.exe 及子进程失败: %v\n", err)
-			} else {
-				fmt.Printf("[trayOnExit] 已强制 kill evs.exe 及所有子进程\n")
-			}
+			fmt.Printf("[trayOnExit] 强制 kill evs.exe 及子进程失败: %v\n", err)
+		} else {
+			fmt.Printf("[trayOnExit] 已强制 kill evs.exe 及所有子进程\n")
 		}
 	}
 }

@@ -29,16 +29,10 @@ import (
 
 var configPath = "config.yaml" // 全局可用
 var appStatus = "未启动"
-var extraArgs []string
 var currentAppPid int
-
-func internalGetAppMap() map[string]internal.App {
-	cfg := internal.GetConfig()
-	if cfg == nil {
-		return nil
-	}
-	return cfg.Apps
-}
+var extraArgs []string
+var lastFoundArgs []string  // 仅记录 FindProcessByPath 找到的参数（不含exe路径）
+var lastFoundAppName string // 记录参数对应的 app 名称
 
 // 获取当前激活应用的路径和参数
 func internalGetAppInfo() (string, string) {
@@ -72,6 +66,7 @@ func internalSwitchActivate(name string) bool {
 		_ = killCurrentApp()
 		cfg.Activate = name
 		internal.SaveConfig(cfg, configPath)
+		// 不再清空 lastFoundArgs，保证参数全程跟随
 		return true
 	}
 	return false
@@ -98,14 +93,27 @@ func runAppProxy(args []string) {
 		return
 	}
 
-	// 合并：应用配置参数 + 本次 args + 启动时 extraArgs
+	fmt.Printf("[DEBUG] app.Args: %v\n", app.Args)
+	fmt.Printf("[DEBUG] lastFoundArgs: %v\n", lastFoundArgs)
+	fmt.Printf("[DEBUG] runAppProxy args: %v\n", args)
+	fmt.Printf("[DEBUG] extraArgs: %v\n", extraArgs)
+
+	// 参数合并规则：
+	// 1. app.Args：应用配置文件中的默认参数
+	// 2. lastFoundArgs：启动 evs 时检测到的已运行实例参数（不含 exe 路径，且始终合并，无论切换到哪个 app）
+	// 3. args：本次 runAppProxy 传入的参数
+	// 4. extraArgs：命令行参数（evs.exe 启动时的参数）
 	finalArgs := app.Args
+	if len(lastFoundArgs) > 0 {
+		finalArgs = internal.MergeArgs(finalArgs, lastFoundArgs)
+	}
 	if args != nil && len(args) > 0 {
 		finalArgs = internal.MergeArgs(finalArgs, args)
 	}
 	if extraArgs != nil && len(extraArgs) > 0 {
 		finalArgs = internal.MergeArgs(finalArgs, extraArgs)
 	}
+	fmt.Printf("[DEBUG] finalArgs: %v\n", finalArgs)
 	_, err := internal.StartAppProcess(app.Path, finalArgs, func(status string, pid int, exitErr error) {
 		switch status {
 		case "running":
@@ -271,7 +279,15 @@ func main() {
 			if pid, args, found := internal.FindProcessByPath(app.Path); found {
 				shouldStart = false
 				appStatus = fmt.Sprintf("运行中 (PID=%d)", pid)
-				extraArgs = args
+				fmt.Printf("[DEBUG] FindProcessByPath 原始args: %v\n", args)
+				if len(args) > 1 {
+					fmt.Printf("[DEBUG] FindProcessByPath 参数部分: %v\n", args[1:])
+					lastFoundArgs = args[1:] // 只记录参数部分，不含exe路径
+				} else {
+					fmt.Printf("[DEBUG] FindProcessByPath 参数部分: []\n")
+					lastFoundArgs = nil
+				}
+				fmt.Printf("[DEBUG] lastFoundArgs 赋值后: %v\n", lastFoundArgs)
 				currentAppPid = pid
 			}
 		}
