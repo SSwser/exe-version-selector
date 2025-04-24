@@ -291,9 +291,12 @@ func trayOnExit() {
 		case <-done:
 			// evs.exe 已退出
 		case <-time.After(3 * time.Second):
-			evserr := evsProcess.Kill()
-			if evserr != nil {
-				fmt.Printf("[trayOnExit] 强制 kill evs.exe 失败: %v\n", evserr)
+			// 超时后强制 kill 进程树，保证代理 app 一起退出
+			err := internal.KillProcessTree(evsProcess.Pid)
+			if err != nil {
+				fmt.Printf("[trayOnExit] 强制 kill evs.exe 及子进程失败: %v\n", err)
+			} else {
+				fmt.Printf("[trayOnExit] 已强制 kill evs.exe 及所有子进程\n")
 			}
 		}
 	}
