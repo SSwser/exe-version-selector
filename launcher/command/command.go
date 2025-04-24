@@ -14,9 +14,6 @@ import (
 	"github.com/SSwser/exe-version-selector/internal"
 )
 
-// evsProcess 用于 RunApp 启动本地 evs.exe 进程
-var evsProcess *os.Process
-
 // SendCommand sends a line command to the socket server and returns trimmed response.
 func SendCommand(cmd string) (string, error) {
 	conn, err := net.Dial("tcp", "127.0.0.1:50505")
@@ -85,6 +82,12 @@ func GetCurrentAppPathArgs() (string, string) {
 	return resp, ""
 }
 
+// ReloadConfig sends reload command and waits briefly
+func ReloadConfig() {
+	SendCommand("reload")
+	time.Sleep(100 * time.Millisecond)
+}
+
 // RestartApp sends restart command.
 func RestartApp() {
 	SendCommand("restart")
@@ -95,7 +98,24 @@ func StopApp() {
 	SendCommand("stop")
 }
 
+// SwitchApp sends switch command.
+
+var OnAppSwitch func()
+
+func SwitchApp(name string) {
+	SendCommand("switch " + name)
+
+	// 切换后也动态刷新
+	internal.UpdateTrayTitle(GetActivate())
+	if OnAppSwitch != nil {
+		OnAppSwitch()
+	}
+}
+
 // RunApp sends run command.
+// OnEVSRun is a callback for menu refresh after running evs.exe.
+var OnEVSRun func()
+
 func RunApp() {
 	_, err := SendCommand("run")
 	if err != nil {
@@ -109,19 +129,33 @@ func RunApp() {
 		err2 := cmd.Start()
 		if err2 == nil {
 			evsProcess = cmd.Process
+			if OnEVSRun != nil {
+				go func() {
+					const (
+						maxWait  = 10 * time.Second
+						interval = 300 * time.Millisecond
+					)
+					waited := time.Duration(0)
+					for waited < maxWait {
+						apps := GetApps()
+						if len(apps) > 0 {
+							break
+						}
+						time.Sleep(interval)
+						waited += interval
+					}
+					OnEVSRun()
+				}()
+			}
 		} else {
 			fmt.Printf("[trayRunApp] 启动 evs.exe 失败: %v\n", err2)
 		}
 	}
 }
 
-// ReloadConfig sends reload command and waits briefly
-func ReloadConfig() {
-	SendCommand("reload")
-	time.Sleep(100 * time.Millisecond)
-}
+// GetEVSProcess returns the current local evs.exe process.
+var evsProcess *os.Process
 
-// GetProcess returns the current local evs.exe process.
-func GetProcess() *os.Process {
-    return evsProcess
+func GetEVSProcess() *os.Process {
+	return evsProcess
 }

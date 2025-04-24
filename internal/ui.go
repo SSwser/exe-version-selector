@@ -15,19 +15,30 @@ var menuRefreshers []func()
 // OnClick, OnRefresh 可为 nil
 // SubMenus 支持分组和递归
 
-type MenuConfig struct {
+type MenuItemData struct {
 	Title     string
 	Tooltip   string
-	OnClick   func(item *systray.MenuItem)
-	OnRefresh func(item *systray.MenuItem)
-	SubMenus  []MenuConfig
 	Disable   bool // 是否禁用此项
 	Separator bool // 是否在此项下添加分隔符
+	SubMenus  []MenuItemData
+	OnClick   func(item *systray.MenuItem)
+	OnRefresh func(item *systray.MenuItem)
 }
 
-// 递归生成菜单分组并注册事件
-func CreateMenuFromConfig(cfg MenuConfig) *systray.MenuItem {
+// 菜单项递归结构体，绑定配置与菜单项对象
+// 用于统一刷新所有 OnRefresh 菜单项
+type MenuEntry struct {
+	Config *MenuItemData
+	Item   *systray.MenuItem
+	Subs   []*MenuEntry
+}
+
+var RootMenuEntries []*MenuEntry
+
+// 递归生成菜单分组并注册事件，并返回 MenuEntry
+func CreateMenuFromConfig(cfg MenuItemData) *MenuEntry {
 	item := systray.AddMenuItem(cfg.Title, cfg.Tooltip)
+	entry := &MenuEntry{Config: &cfg, Item: item}
 
 	// 禁用支持
 	if cfg.Disable {
@@ -43,24 +54,9 @@ func CreateMenuFromConfig(cfg MenuConfig) *systray.MenuItem {
 		}()
 	}
 
-	for _, sub := range cfg.SubMenus {
-		subItem := item.AddSubMenuItem(sub.Title, sub.Tooltip)
-		if sub.Disable {
-			subItem.Disable()
-		}
-		if sub.OnClick != nil {
-			go func(s *systray.MenuItem, handler func(*systray.MenuItem)) {
-				for {
-					<-s.ClickedCh
-					handler(s)
-				}
-			}(subItem, sub.OnClick)
-		}
-
-		// 递归子菜单
-		if len(sub.SubMenus) > 0 {
-			CreateMenuFromConfigRecursive(subItem, sub)
-		}
+	for i := range cfg.SubMenus {
+		subEntry := CreateMenuFromConfig(cfg.SubMenus[i])
+		entry.Subs = append(entry.Subs, subEntry)
 	}
 
 	// 如果 Separator 为真，则在此项下添加分隔符
@@ -68,12 +64,28 @@ func CreateMenuFromConfig(cfg MenuConfig) *systray.MenuItem {
 		systray.AddSeparator()
 	}
 
-	return item
+	return entry
+}
+
+// 递归刷新所有菜单项的 OnRefresh
+func RefreshAllMenuItems() {
+	for _, entry := range RootMenuEntries {
+		refreshEntry(entry)
+	}
+}
+
+func refreshEntry(entry *MenuEntry) {
+	if entry.Config.OnRefresh != nil {
+		entry.Config.OnRefresh(entry.Item)
+	}
+	for _, sub := range entry.Subs {
+		refreshEntry(sub)
+	}
 }
 
 // 子菜单递归辅助
-func CreateMenuFromConfigRecursive(parent *systray.MenuItem, cfg MenuConfig) {
-	for _, sub := range cfg.SubMenus {
+func CreateMenuFromConfigRecursive(parent *systray.MenuItem, data MenuItemData) {
+	for _, sub := range data.SubMenus {
 		subItem := parent.AddSubMenuItem(sub.Title, sub.Tooltip)
 		if sub.OnClick != nil {
 			go func(s *systray.MenuItem, handler func(*systray.MenuItem)) {
@@ -102,6 +114,8 @@ func StartMenuRefresher() {
 			for _, f := range menuRefreshers {
 				f()
 			}
+			// 新增：每秒统一刷新所有菜单项
+			RefreshAllMenuItems()
 			time.Sleep(time.Second)
 		}
 	}()

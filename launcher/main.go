@@ -29,7 +29,7 @@ func trayOnReady() {
 	}
 
 	// 菜单分组配置（全部声明式）
-	menuConfig := []internal.MenuConfig{
+	menuConfig := []internal.MenuItemData{
 		{
 			Title:   "未连接",
 			Tooltip: "应用运行状态",
@@ -116,10 +116,12 @@ func trayOnReady() {
 		},
 	}
 	for _, cfg := range menuConfig {
-		m := internal.CreateMenuFromConfig(cfg)
+		entry := internal.CreateMenuFromConfig(cfg)
 		if cfg.Title == "切换到" {
-			menuSwitch = m
+			menuSwitch = entry.Item
 		}
+		// 收集根菜单项，便于刷新
+		internal.RootMenuEntries = append(internal.RootMenuEntries, entry)
 	}
 	// 初始化后立即同步一次切换子菜单
 	buildSwitchSubMenus()
@@ -158,12 +160,13 @@ func buildSwitchSubMenus() {
 				for {
 					<-m.ClickedCh
 					if n != command.GetActivate() {
-						switchApp(n)
+						command.SwitchApp(n)
 					}
 				}
 			}(appName, sub)
 		}
 	}
+
 	// 每次都刷新 checked 状态
 	activate := command.GetActivate()
 	for i, sub := range menuSwitchSubs {
@@ -187,17 +190,8 @@ func openCurrentAppDir() {
 	exec.Command("explorer.exe", dir).Start()
 }
 
-// switchApp sends switch command.
-func switchApp(name string) {
-	command.SendCommand("switch " + name)
-
-	// 切换后也动态刷新
-	internal.UpdateTrayTitle(command.GetActivate())
-	buildSwitchSubMenus()
-}
-
 func trayOnExit() {
-	if p := command.GetProcess(); p != nil {
+	if p := command.GetEVSProcess(); p != nil {
 		// 1. 优雅通知 evs
 		command.SendCommand("exit")
 		// 2. 最多等待 3 秒
@@ -218,4 +212,9 @@ func trayOnExit() {
 
 func main() {
 	systray.Run(trayOnReady, trayOnExit)
+}
+
+func init() {
+	command.OnEVSRun = buildSwitchSubMenus
+	command.OnAppSwitch = buildSwitchSubMenus
 }
