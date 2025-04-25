@@ -52,7 +52,7 @@ func trayOnReady() {
 			Tooltip: "可执行文件路径",
 			Disable: true,
 			OnRefresh: func(item *systray.MenuItem) {
-				p, _ := command.GetCurrentAppPathArgs()
+				_, p, _ := command.GetAppInfo("")
 				item.SetTitle("路径: " + p)
 			},
 		},
@@ -62,7 +62,7 @@ func trayOnReady() {
 			Disable:   true,
 			Separator: true,
 			OnRefresh: func(item *systray.MenuItem) {
-				_, a := command.GetCurrentAppPathArgs()
+				_, _, a := command.GetAppInfo("")
 				item.SetTitle("参数: " + a)
 			},
 		},
@@ -70,7 +70,7 @@ func trayOnReady() {
 			Title:   "打开目录",
 			Tooltip: "在文件资源管理器中打开当前应用所在文件夹",
 			OnClick: func(item *systray.MenuItem) {
-				appPath, _ := command.GetCurrentAppPathArgs()
+				_, appPath, _ := command.GetAppInfo("")
 				if appPath != "" {
 					dir := filepath.Dir(appPath)
 					exec.Command("explorer.exe", dir).Start()
@@ -134,6 +134,8 @@ func trayOnReady() {
 	internal.RegisterMenuRefresher(func() {
 		internal.UpdateTrayTitle(command.GetActivate())
 	})
+
+	// 启动菜单刷新器
 	internal.StartMenuRefresher()
 }
 
@@ -183,21 +185,24 @@ func buildSwitchSubMenus() {
 }
 
 func trayOnExit() {
-	if p := command.GetEVSProcess(); p != nil {
-		// 1. 优雅通知 evs
-		command.SendCommand("exit")
-		// 2. 最多等待 3 秒
-		done := make(chan error, 1)
-		go func() { _, err := p.Wait(); done <- err }()
-		select {
-		case <-done:
-			fmt.Println("[trayOnExit] evs 正常退出")
-		case <-time.After(3 * time.Second):
-			if err := internal.KillProcessTree(p.Pid); err != nil {
-				fmt.Printf("[trayOnExit] kill evs 失败: %v\n", err)
-			} else {
-				fmt.Println("[trayOnExit] evs 已被强制终止")
-			}
+	evsProc := command.GetEVSProcess()
+	if evsProc == nil {
+		return
+	}
+
+	// 1. 优雅通知 evs
+	command.SendCommand("exit")
+	// 2. 最多等待 3 秒
+	done := make(chan error, 1)
+	go func() { _, err := evsProc.Wait(); done <- err }()
+	select {
+	case <-done:
+		fmt.Println("[trayOnExit] evs 正常退出")
+	case <-time.After(3 * time.Second):
+		if err := internal.KillProcessTree(evsProc.Pid); err != nil {
+			fmt.Printf("[trayOnExit] kill evs 失败: %v\n", err)
+		} else {
+			fmt.Println("[trayOnExit] evs 已被强制终止")
 		}
 	}
 }

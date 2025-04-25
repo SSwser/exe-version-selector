@@ -32,14 +32,11 @@ func SendCommand(cmd string) (string, error) {
 	return strings.TrimSpace(string(resp)), nil
 }
 
-// GetApps returns the list of apps by "apporder" or fallback to "list".
+// GetApps returns the list of apps by "list" (每行一个 name)。
 func GetApps() []string {
-	resp, err := SendCommand("apporder")
-	if err != nil || strings.TrimSpace(resp) == "" {
-		resp, err = SendCommand("list")
-		if err != nil {
-			return nil
-		}
+	resp, err := SendCommand("list")
+	if err != nil {
+		return nil
 	}
 	lines := strings.Split(resp, "\n")
 	var apps []string
@@ -54,11 +51,8 @@ func GetApps() []string {
 
 // GetActivate returns the current activated app name.
 func GetActivate() string {
-	resp, err := SendCommand("activate")
-	if err != nil {
-		return ""
-	}
-	return resp
+	name, _, _ := GetAppInfo("")
+	return name
 }
 
 // GetAppStatus returns AppStatus from "status".
@@ -70,17 +64,21 @@ func GetAppStatus() internal.AppStatus {
 	return internal.ParseAppStatus(resp)
 }
 
-// GetCurrentAppPathArgs returns current app path and args from "getappinfo".
-func GetCurrentAppPathArgs() (string, string) {
-	resp, err := SendCommand("getappinfo")
+// GetAppInfo 获取应用信息，name 为空则为当前激活 app，否则为指定 app。
+func GetAppInfo(name string) (string, string, string) {
+	cmd := "info"
+	if name != "" {
+		cmd = "info:" + name
+	}
+	resp, err := SendCommand(cmd)
 	if err != nil {
-		return "", ""
+		return "", "", ""
 	}
-	parts := strings.SplitN(resp, "|||", 2)
-	if len(parts) == 2 {
-		return parts[0], parts[1]
+	parts := strings.SplitN(resp, "|||", 3)
+	if len(parts) == 3 {
+		return parts[0], parts[1], parts[2]
 	}
-	return resp, ""
+	return "", "", ""
 }
 
 // ReloadConfig sends reload command and waits briefly
@@ -100,11 +98,10 @@ func StopApp() {
 }
 
 // SwitchApp sends switch command.
-
 var OnAppSwitch func()
 
 func SwitchApp(name string) {
-	SendCommand("switch " + name)
+	SendCommand("switch:" + name)
 
 	// 切换后也动态刷新
 	internal.UpdateTrayTitle(GetActivate())
@@ -117,40 +114,46 @@ func SwitchApp(name string) {
 // OnEVSRun is a callback for menu refresh after running evs.exe.
 var OnEVSRun func()
 
-func RunApp() {
-	_, err := SendCommand("run")
+func RunApp(args ...string) {
+	cmd := "run"
+	if len(args) > 0 {
+		cmd = "run:" + strings.Join(args, " ")
+	}
+	_, err := SendCommand(cmd)
 	if err != nil {
 		absPath, errAbs := filepath.Abs("evs.exe")
 		if errAbs != nil {
 			fmt.Printf("[trayRunApp] 获取 evs.exe 路径失败: %v\n", errAbs)
 			return
 		}
-		cmd := exec.Command(absPath)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true} // 隐藏控制台窗口
-		cmd.Dir = "."
-		err2 := cmd.Start()
-		if err2 == nil {
-			evsProcess = cmd.Process
-			if OnEVSRun != nil {
-				go func() {
-					const (
-						maxWait  = 10 * time.Second
-						interval = 300 * time.Millisecond
-					)
-					waited := time.Duration(0)
-					for waited < maxWait {
-						apps := GetApps()
-						if len(apps) > 0 {
-							break
-						}
-						time.Sleep(interval)
-						waited += interval
-					}
-					OnEVSRun()
-				}()
-			}
-		} else {
+
+		cmdObj := exec.Command(absPath)
+		cmdObj.SysProcAttr = &syscall.SysProcAttr{HideWindow: true} // 隐藏控制台窗口
+		cmdObj.Dir = "."
+		err2 := cmdObj.Start()
+		if err2 != nil {
 			fmt.Printf("[trayRunApp] 启动 evs.exe 失败: %v\n", err2)
+			return
+		}
+
+		evsProcess = cmdObj.Process
+		if OnEVSRun != nil {
+			go func() {
+				const (
+					maxWait  = 10 * time.Second
+					interval = 300 * time.Millisecond
+				)
+				waited := time.Duration(0)
+				for waited < maxWait {
+					apps := GetApps()
+					if len(apps) > 0 {
+						break
+					}
+					time.Sleep(interval)
+					waited += interval
+				}
+				OnEVSRun()
+			}()
 		}
 	}
 }

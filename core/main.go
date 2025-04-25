@@ -34,48 +34,15 @@ var currentAppPid int
 var extraArgs []string
 var lastFoundArgs []string // 仅记录 FindProcessByPath 找到的参数（不含exe路径）
 
-// 获取当前激活应用的路径和参数
-func internalGetAppInfo() (string, string) {
+func internalGetConfig() (*internal.Config, error) {
 	cfg := internal.GetConfig()
 	if cfg == nil {
-		return "", ""
+		return nil, fmt.Errorf("ERR config not loaded")
 	}
-	app, ok := cfg.Apps[cfg.Activate]
-	if !ok {
-		return "", ""
-	}
-	return app.Path, strings.Join(app.Args, " ")
+	return cfg, nil
 }
 
-func internalGetActivate() string {
-	cfg := internal.GetConfig()
-	if cfg == nil {
-		return ""
-	}
-	return cfg.Activate
-}
-
-func internalSwitchActivate(name string) bool {
-	cfg := internal.GetConfig()
-	if cfg == nil {
-		return false
-	}
-	if _, ok := cfg.Apps[name]; ok {
-		// 切换前自动 kill 旧进程
-		if currentAppPid != 0 {
-			fmt.Fprintf(os.Stderr, "[切换应用] 兜底强制终止进程树: PID=%d\n", currentAppPid)
-			_ = internal.KillProcessTree(currentAppPid)
-		}
-		_ = killCurrentApp()
-		cfg.Activate = name
-		internal.SaveConfig(cfg, configPath)
-		// 不再清空 lastFoundArgs，保证参数全程跟随
-		return true
-	}
-	return false
-}
-
-func internalGetStatus() string {
+func internalGetAppStatus() string {
 	// 用 FindProcessByPath 判断真实运行状态
 	// if pid, _, found := internal.FindProcessByPath(app.Path); found && pid != 0 {
 	// 	return internal.AppRunning.String()
@@ -83,10 +50,85 @@ func internalGetStatus() string {
 	return fmt.Sprintf("%s", appStatus)
 }
 
-// 下面这些函数需结合你的原有业务实现
+func internalGetActivate() string {
+	cfg, err := internalGetConfig()
+	if err != nil {
+		return ""
+	}
+	return cfg.Activate
+}
+
+func internalSwitchActivate(name string) error {
+	cfg, err := internalGetConfig()
+	if err != nil {
+		return err
+	}
+
+	if _, ok := cfg.Apps[name]; !ok {
+		return fmt.Errorf("ERR app not found")
+	}
+
+	// 切换前自动 kill 旧进程
+	// ---
+	// 为什么这里要连续两次“杀进程”？
+	// 1. 先用 KillProcessTree（taskkill /F /T）暴力兜底，确保主进程和所有子进程都被 Windows 强杀，防止有顽固子进程残留。
+	//    但 taskkill 只是发出 kill 命令，主进程可能未必马上消失，或有极端情况未被完全杀掉。
+	// 2. 再用 internalKillCurrentApp（KillProcessTreeAndWait）轮询等待主进程彻底退出（最多5秒），保证主进程真的消失，防止竞态问题。
+	//    但它只检测主进程存活，可能有子进程残留，所以两者结合最大程度保证彻底清理。
+	// 这样做是实际工程中最稳妥的“兜底+确认”组合。
+	if currentAppPid != 0 {
+		fmt.Fprintf(os.Stderr, "[切换应用] 兜底强制终止进程树: PID=%d\n", currentAppPid)
+		_ = internal.KillProcessTree(currentAppPid)
+	}
+	err = internalKillCurrentApp()
+	if err != nil {
+		return err
+	}
+
+	cfg.Activate = name
+	internal.SaveConfig(cfg, configPath)
+
+	// 不要清空 lastFoundArgs，保证参数全程跟随
+	go runAppProxy(nil)
+	return nil
+}
+
+// 参数 name 为空时返回当前激活应用，否则返回指定应用
+// 返回: name, path, args, error
+func internalGetAppInfo(name string) (string, string, string, error) {
+	appName := name
+	if name == "" {
+		appName = internalGetActivate()
+	}
+
+	cfg, err := internalGetConfig()
+	if err != nil {
+		return "", "", "", err
+	}
+	app, ok := cfg.Apps[appName]
+	if !ok {
+		return "", "", "", fmt.Errorf("ERR app not found")
+	}
+	return appName, app.Path, strings.Join(app.Args, " "), nil
+}
+
+func internalKillCurrentApp() error {
+	if currentAppPid == 0 {
+		return nil
+	}
+	err := internal.KillProcessTreeAndWait(currentAppPid)
+	if err == nil {
+		appStatus = "已终止 (PID=" + fmt.Sprint(currentAppPid) + ")"
+	} else {
+		appStatus = "终止失败 (PID=" + fmt.Sprint(currentAppPid) + ")"
+	}
+	currentAppPid = 0
+	return err
+}
+
 func runAppProxy(args []string) {
-	cfg := internal.GetConfig()
-	if cfg == nil {
+	cfg, err := internalGetConfig()
+	if err != nil {
 		fmt.Println("配置未加载")
 		return
 	}
@@ -98,23 +140,23 @@ func runAppProxy(args []string) {
 
 	fmt.Printf("[DEBUG] app.Args: %v\n", app.Args)
 	fmt.Printf("[DEBUG] lastFoundArgs: %v\n", lastFoundArgs)
-	fmt.Printf("[DEBUG] runAppProxy args: %v\n", args)
 	fmt.Printf("[DEBUG] extraArgs: %v\n", extraArgs)
+	fmt.Printf("[DEBUG] runAppProxy args: %v\n", args)
 
 	// 参数合并规则：
 	// 1. app.Args：应用配置文件中的默认参数
 	// 2. lastFoundArgs：启动 evs 时检测到的已运行实例参数（不含 exe 路径，且始终合并，无论切换到哪个 app）
-	// 3. args：本次 runAppProxy 传入的参数
-	// 4. extraArgs：命令行参数（evs.exe 启动时的参数）
+	// 3. extraArgs：命令行参数（evs.exe 启动时的参数）
+	// 4. args：本次 runAppProxy 传入的参数
 	finalArgs := app.Args
-	for _, group := range [][]string{lastFoundArgs, args, extraArgs} {
+	for _, group := range [][]string{lastFoundArgs, extraArgs, args} {
 		if len(group) > 0 {
 			finalArgs = internal.MergeArgs(finalArgs, group)
 		}
 	}
 	fmt.Printf("[DEBUG] finalArgs: %v\n", finalArgs)
 
-	_, err := internal.StartAppProcess(app.Path, finalArgs, func(status string, pid int, exitErr error) {
+	_, err = internal.StartAppProcess(app.Path, finalArgs, func(status string, pid int, exitErr error) {
 		switch status {
 		case "running":
 			appStatus = fmt.Sprintf("运行中 (PID=%d)", pid)
@@ -148,22 +190,6 @@ func runAppProxy(args []string) {
 	}
 }
 
-// 关闭当前启动的应用进程
-func killCurrentApp() error {
-	if currentAppPid == 0 {
-		return nil
-	}
-	err := internal.KillProcessTreeAndWait(currentAppPid)
-	if err == nil {
-		appStatus = "已终止 (PID=" + fmt.Sprint(currentAppPid) + ")"
-	} else {
-		appStatus = "终止失败 (PID=" + fmt.Sprint(currentAppPid) + ")"
-	}
-	currentAppPid = 0
-	return err
-}
-
-// 启动业务 socket 服务
 func startConsoleServer(configPath string) {
 	ln, err := net.Listen("tcp", "127.0.0.1:50505")
 	if err != nil {
@@ -193,96 +219,91 @@ func handleConsoleConn(conn net.Conn, configPath string) {
 		conn.Write([]byte("ERR empty command\n"))
 		return
 	}
-	switch args[0] {
-	case "exit":
-		conn.Write([]byte("OK\n"))
-		go func() {
-			if currentAppPid != 0 {
-				_ = internal.KillProcessTree(currentAppPid)
-				currentAppPid = 0
-			}
-			time.Sleep(50 * time.Millisecond)
-			os.Exit(0)
-		}()
-		return
-	case "apporder":
-		cfg := internal.GetConfig()
-		if cfg == nil {
-			conn.Write([]byte("ERR config not loaded\n"))
-			return
-		}
-		fmt.Fprintf(os.Stderr, "[SOCKET] 收到 apporder, AppOrder=%v\n", cfg.AppOrder)
-		for _, name := range cfg.AppOrder {
-			conn.Write([]byte(name + "\n"))
-		}
-		return
-	case "list":
-		cfg := internal.GetConfig()
-		if cfg == nil {
-			conn.Write([]byte("ERR config not loaded\n"))
-			return
-		}
-		for _, name := range cfg.AppOrder {
-			app := cfg.Apps[name]
-			line := fmt.Sprintf("%s %s %v", name, app.Path, app.Args)
-			conn.Write([]byte(line + "\n"))
-		}
+	fmt.Printf("[SOCKET] 收到命令: %v\n", args)
+
+	// 支持 command:args 格式
+	cmd := args[0]
+	cmdArg := ""
+	if idx := strings.Index(cmd, ":"); idx != -1 {
+		cmdArg = cmd[idx+1:]
+		cmd = cmd[:idx]
+	}
+
+	switch cmd {
 	case "activate":
-		conn.Write([]byte(internalGetActivate() + "\n"))
-	case "switch":
-		if len(args) < 2 {
-			conn.Write([]byte("ERR need app name\n"))
+		conn.Write([]byte(internalGetActivate()))
+	case "status":
+		conn.Write([]byte(internalGetAppStatus()))
+	case "list":
+		cfg, err := internalGetConfig()
+		if err != nil {
+			conn.Write([]byte(err.Error()))
 			return
 		}
-		if internalSwitchActivate(args[1]) {
-			go runAppProxy(nil)
-			conn.Write([]byte("OK\n"))
-		} else {
-			conn.Write([]byte("ERR app not found\n"))
+		conn.Write([]byte(strings.Join(cfg.AppOrder, "\n")))
+	case "info":
+		appName, appPath, appArgs, err := internalGetAppInfo(cmdArg)
+		if err != nil {
+			conn.Write([]byte(err.Error()))
+			return
 		}
-	case "run":
-		// 运行当前激活应用，参数透传
-		go runAppProxy(args[1:])
-		conn.Write([]byte("OK\n"))
-	case "status":
-		conn.Write([]byte(internalGetStatus() + "\n"))
-	case "getappinfo":
-		path, args := internalGetAppInfo()
-		conn.Write([]byte(path + "|||" + args + "\n"))
+		appInfoStr := fmt.Sprintf("%s|||%s|||%s\n", appName, appPath, appArgs)
+		conn.Write([]byte(appInfoStr))
 	case "reload":
 		fmt.Println("[reload]")
 		err := internal.ReloadConfig(configPath)
-		if err == nil {
-			// 刷新托盘菜单（递归 OnRefresh）
-			internal.RefreshAllMenuItems()
-			conn.Write([]byte("OK\n"))
-		} else {
-			conn.Write([]byte("ERR reload failed\n"))
+		if err != nil {
+			conn.Write([]byte(err.Error()))
+			return
 		}
+		internal.RefreshAllMenuItems() // 刷新托盘菜单（递归 OnRefresh）
+		conn.Write([]byte("OK\n"))
+	case "run":
+		var runArgs []string // 运行当前激活应用，参数透传
+		if cmdArg != "" {
+			runArgs = strings.Fields(cmdArg)
+		}
+
+		go runAppProxy(runArgs)
+		conn.Write([]byte("OK\n"))
+	case "switch":
+		if cmdArg == "" {
+			conn.Write([]byte("ERR need app name\n"))
+			return
+		}
+
+		err := internalSwitchActivate(cmdArg)
+		if err != nil {
+			conn.Write([]byte(err.Error()))
+			return
+		}
+		conn.Write([]byte("OK\n"))
 	case "restart":
-		oldPid := currentAppPid // 记录旧 PID
-		err := killCurrentApp()
-		if err == nil && oldPid != 0 {
-			// 轮询确认进程树已完全退出，最多等 4 秒
-			for i := 0; i < 40; i++ {
-				if !internal.IsProcessTreeAlive(oldPid) {
-					fmt.Printf("[restart] 旧进程及其子进程已完全退出\n")
-					break
-				}
-				time.Sleep(100 * time.Millisecond)
-			}
+		err := internalKillCurrentApp()
+		if err != nil {
+			conn.Write([]byte(err.Error()))
+			return
 		}
+
 		fmt.Println("[restart] 启动新进程...")
 		go runAppProxy(nil)
 		conn.Write([]byte("OK\n"))
-		return
 	case "stop":
-		err := killCurrentApp()
-		if err == nil {
-			conn.Write([]byte("OK\n"))
-		} else {
-			conn.Write([]byte("ERR kill failed\n"))
+		err := internalKillCurrentApp()
+		if err != nil {
+			conn.Write([]byte(err.Error()))
+			return
 		}
+		fmt.Println("[stop] 已终止")
+		conn.Write([]byte("OK\n"))
+	case "exit":
+		if currentAppPid != 0 {
+			_ = internalKillCurrentApp()
+			currentAppPid = 0
+		}
+		conn.Write([]byte("OK\n"))
+		time.Sleep(50 * time.Millisecond)
+		os.Exit(0)
 	default:
 		conn.Write([]byte("ERR unknown command\n"))
 	}
@@ -309,6 +330,7 @@ func main() {
 		if internal.HandleCliCommand(os.Args[1:], configPath) {
 			return
 		}
+
 		extraArgs = os.Args[1:]
 	} else {
 		extraArgs = nil
@@ -316,31 +338,34 @@ func main() {
 
 	// 启动应用前判断是否已启动
 	shouldStart := true
-	cfg := internal.GetConfig()
-	if cfg != nil {
-		app, ok := cfg.Apps[cfg.Activate]
-		if ok {
-			// 通过进程路径查找是否有已运行实例
-			if pid, args, found := internal.FindProcessByPath(app.Path); found {
-				shouldStart = false
-				appStatus = fmt.Sprintf("运行中 (PID=%d)", pid)
-				fmt.Printf("[DEBUG] FindProcessByPath 原始args: %v\n", args)
-				if len(args) > 1 {
-					fmt.Printf("[DEBUG] FindProcessByPath 参数部分: %v\n", args[1:])
-					lastFoundArgs = args[1:] // 只记录参数部分，不含exe路径
-				} else {
-					fmt.Printf("[DEBUG] FindProcessByPath 参数部分: []\n")
-					lastFoundArgs = nil
-				}
-				fmt.Printf("[DEBUG] lastFoundArgs 赋值后: %v\n", lastFoundArgs)
-				currentAppPid = pid
-			}
-		}
-	}
-	if shouldStart {
-		go runAppProxy(nil)
-	}
 
-	// 启动 socket 服务
-	startConsoleServer(configPath)
+	appName, appPath, _, err := internalGetAppInfo("")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "获取应用信息失败: %v\n", err)
+		os.Exit(1)
+	}
+	if appName != "" {
+		// 通过进程路径查找是否有已运行实例
+		if pid, args, found := internal.FindProcessByPath(appPath); found {
+			shouldStart = false
+			appStatus = fmt.Sprintf("运行中 (PID=%d)", pid)
+			fmt.Printf("[DEBUG] FindProcessByPath 原始args: %v\n", args)
+			if len(args) > 1 {
+				fmt.Printf("[DEBUG] FindProcessByPath 参数部分: %v\n", args[1:])
+				lastFoundArgs = args[1:] // 只记录参数部分，不含exe路径
+			} else {
+				fmt.Printf("[DEBUG] FindProcessByPath 参数部分: []\n")
+				lastFoundArgs = nil
+			}
+			fmt.Printf("[DEBUG] lastFoundArgs 赋值后: %v\n", lastFoundArgs)
+			currentAppPid = pid
+		}
+
+		if shouldStart {
+			go runAppProxy(nil)
+		}
+
+		// 启动 socket 服务
+		startConsoleServer(configPath)
+	}
 }
