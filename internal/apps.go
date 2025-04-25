@@ -8,6 +8,14 @@ import (
 // AppStatus 表示应用运行状态，用于托盘菜单、主程序等统一判断
 type AppStatus int
 
+const (
+	AppUnknown AppStatus = iota
+	AppRunning
+	AppStopped
+	AppExited
+	AppCrashed
+)
+
 func (a AppStatus) String() string {
 	// 与 ParseAppStatus 的判定顺序保持一致
 	switch a {
@@ -25,14 +33,6 @@ func (a AppStatus) String() string {
 		return "未知"
 	}
 }
-
-const (
-	AppUnknown AppStatus = iota
-	AppRunning
-	AppStopped
-	AppExited
-	AppCrashed
-)
 
 // ParseAppStatus 从描述字符串解析为 AppStatus 枚举
 func ParseAppStatus(status string) AppStatus {
@@ -66,9 +66,10 @@ func ListApps(cfg *Config) {
 			marker = "[*]"
 		}
 		pad := maxNameLen - DisplayWidth(name)
-		fmt.Printf("%s %s%s  %s %v\n", marker, name, Spaces(pad), app.Path, app.Args)
+		fmt.Printf("%s %s%s  %s\n", marker, name, Spaces(pad), app.Path)
 	}
 }
+
 func AddApp(cfg *Config, args []string) {
 	if len(args) < 2 {
 		fmt.Println("用法: add <name> <path> [args...]")
@@ -77,6 +78,10 @@ func AddApp(cfg *Config, args []string) {
 	name := args[0]
 	path := args[1]
 	appArgs := args[2:]
+	if _, exists := cfg.Apps[name]; exists {
+		fmt.Printf("应用名已存在: %s\n", name)
+		return
+	}
 	cfg.Apps[name] = App{Path: path, Args: appArgs}
 	cfg.AppOrder = append(cfg.AppOrder, name)
 	fmt.Printf("已添加应用: %s\n", name)
@@ -102,6 +107,28 @@ func RemoveApp(cfg *Config, args []string) {
 	}
 	cfg.AppOrder = order
 	fmt.Printf("已删除应用: %s\n", name)
+}
+
+// ShowAppInfo 根据 app name 打印详细信息
+func ShowAppInfo(cfg *Config, args []string) {
+	name := ""
+	if len(args) < 1 || args[0] == "" {
+		name = cfg.Activate
+		if name == "" {
+			fmt.Println("无激活应用且未指定 name")
+			return
+		}
+	} else {
+		name = args[0]
+	}
+	app, ok := cfg.Apps[name]
+	if !ok {
+		fmt.Printf("未找到应用: %s\n", name)
+		return
+	}
+	fmt.Printf("名称: %s\n", name)
+	fmt.Printf("路径: %s\n", app.Path)
+	fmt.Printf("参数: %s\n", joinArgs(app.Args))
 }
 
 func SwitchApp(cfg *Config, args []string) {

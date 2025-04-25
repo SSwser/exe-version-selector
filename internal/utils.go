@@ -1,6 +1,9 @@
 package internal
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // displayWidth 兼容中英文宽度
 func DisplayWidth(s string) int {
@@ -26,4 +29,12 @@ func Spaces(n int) string {
 // 合并默认参数和额外参数
 func MergeArgs(defaults, extras []string) []string {
 	return append(defaults, extras...)
+}
+
+// joinArgs 将参数数组拼接为空格分隔字符串
+func joinArgs(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	return strings.Join(args, " ")
 }
