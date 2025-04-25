@@ -32,12 +32,14 @@ var configPath = "config.yaml" // 全局可用
 var appStatus = "未启动"
 var currentAppPid int
 var extraArgs []string
-var lastFoundArgs []string  // 仅记录 FindProcessByPath 找到的参数（不含exe路径）
-var lastFoundAppName string // 记录参数对应的 app 名称
+var lastFoundArgs []string // 仅记录 FindProcessByPath 找到的参数（不含exe路径）
 
 // 获取当前激活应用的路径和参数
 func internalGetAppInfo() (string, string) {
-	cfg, _ := internal.LoadConfig(configPath)
+	cfg := internal.GetConfig()
+	if cfg == nil {
+		return "", ""
+	}
 	app, ok := cfg.Apps[cfg.Activate]
 	if !ok {
 		return "", ""
@@ -105,16 +107,13 @@ func runAppProxy(args []string) {
 	// 3. args：本次 runAppProxy 传入的参数
 	// 4. extraArgs：命令行参数（evs.exe 启动时的参数）
 	finalArgs := app.Args
-	if len(lastFoundArgs) > 0 {
-		finalArgs = internal.MergeArgs(finalArgs, lastFoundArgs)
-	}
-	if args != nil && len(args) > 0 {
-		finalArgs = internal.MergeArgs(finalArgs, args)
-	}
-	if extraArgs != nil && len(extraArgs) > 0 {
-		finalArgs = internal.MergeArgs(finalArgs, extraArgs)
+	for _, group := range [][]string{lastFoundArgs, args, extraArgs} {
+		if len(group) > 0 {
+			finalArgs = internal.MergeArgs(finalArgs, group)
+		}
 	}
 	fmt.Printf("[DEBUG] finalArgs: %v\n", finalArgs)
+
 	_, err := internal.StartAppProcess(app.Path, finalArgs, func(status string, pid int, exitErr error) {
 		switch status {
 		case "running":
@@ -207,14 +206,22 @@ func handleConsoleConn(conn net.Conn, configPath string) {
 		}()
 		return
 	case "apporder":
-		cfg, _ := internal.LoadConfig(configPath)
+		cfg := internal.GetConfig()
+		if cfg == nil {
+			conn.Write([]byte("ERR config not loaded\n"))
+			return
+		}
 		fmt.Fprintf(os.Stderr, "[SOCKET] 收到 apporder, AppOrder=%v\n", cfg.AppOrder)
 		for _, name := range cfg.AppOrder {
 			conn.Write([]byte(name + "\n"))
 		}
 		return
 	case "list":
-		cfg, _ := internal.LoadConfig(configPath)
+		cfg := internal.GetConfig()
+		if cfg == nil {
+			conn.Write([]byte("ERR config not loaded\n"))
+			return
+		}
 		for _, name := range cfg.AppOrder {
 			app := cfg.Apps[name]
 			line := fmt.Sprintf("%s %s %v", name, app.Path, app.Args)
@@ -243,8 +250,15 @@ func handleConsoleConn(conn net.Conn, configPath string) {
 		path, args := internalGetAppInfo()
 		conn.Write([]byte(path + "|||" + args + "\n"))
 	case "reload":
-		// 重新加载配置（此处为占位，实际已每次操作自动加载）
-		conn.Write([]byte("OK\n"))
+		fmt.Println("[reload]")
+		err := internal.ReloadConfig(configPath)
+		if err == nil {
+			// 刷新托盘菜单（递归 OnRefresh）
+			internal.RefreshAllMenuItems()
+			conn.Write([]byte("OK\n"))
+		} else {
+			conn.Write([]byte("ERR reload failed\n"))
+		}
 	case "restart":
 		oldPid := currentAppPid // 记录旧 PID
 		err := killCurrentApp()
@@ -252,7 +266,7 @@ func handleConsoleConn(conn net.Conn, configPath string) {
 			// 轮询确认进程树已完全退出，最多等 4 秒
 			for i := 0; i < 40; i++ {
 				if !internal.IsProcessTreeAlive(oldPid) {
-					fmt.Printf("[restart] 旧进程及其子进程已完全退出\n", oldPid)
+					fmt.Printf("[restart] 旧进程及其子进程已完全退出\n")
 					break
 				}
 				time.Sleep(100 * time.Millisecond)
