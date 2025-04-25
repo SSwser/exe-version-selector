@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
-	"strings"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -31,46 +31,50 @@ func trayOnReady() {
 	// 菜单分组配置（全部声明式）
 	menuConfig := []internal.MenuItemData{
 		{
-			Title:   "未连接",
-			Tooltip: "应用运行状态",
+			Title:     "未连接",
+			Tooltip:   "应用运行状态",
+			Disable:   true,
+			Separator: true,
 			OnRefresh: func(item *systray.MenuItem) {
 				item.SetTitle("[状态] " + command.GetAppStatus().String())
 			},
-			Disable:   true,
-			Separator: true,
 		},
 		{
 			Title:   "应用: ",
 			Tooltip: "当前运行的应用",
+			Disable: true,
 			OnRefresh: func(item *systray.MenuItem) {
 				item.SetTitle("应用: " + command.GetActivate())
 			},
-			Disable: true,
 		},
 		{
 			Title:   "路径: ",
 			Tooltip: "可执行文件路径",
+			Disable: true,
 			OnRefresh: func(item *systray.MenuItem) {
 				p, _ := command.GetCurrentAppPathArgs()
 				item.SetTitle("路径: " + p)
 			},
-			Disable: true,
 		},
 		{
-			Title:   "参数: ",
-			Tooltip: "启动参数",
+			Title:     "参数: ",
+			Tooltip:   "启动参数",
+			Disable:   true,
+			Separator: true,
 			OnRefresh: func(item *systray.MenuItem) {
 				_, a := command.GetCurrentAppPathArgs()
 				item.SetTitle("参数: " + a)
 			},
-			Disable:   true,
-			Separator: true,
 		},
 		{
 			Title:   "打开目录",
 			Tooltip: "在文件资源管理器中打开当前应用所在文件夹",
 			OnClick: func(item *systray.MenuItem) {
-				openCurrentAppDir()
+				appPath, _ := command.GetCurrentAppPathArgs()
+				if appPath != "" {
+					dir := filepath.Dir(appPath)
+					exec.Command("explorer.exe", dir).Start()
+				}
 			},
 		},
 		{
@@ -90,12 +94,12 @@ func trayOnReady() {
 			},
 		},
 		{
-			Title:   "关闭",
-			Tooltip: "远程关闭当前激活应用",
+			Title:     "关闭",
+			Tooltip:   "远程关闭当前激活应用",
+			Separator: true,
 			OnClick: func(item *systray.MenuItem) {
 				command.StopApp()
 			},
-			Separator: true,
 		},
 		{
 			Title:   "重载配置",
@@ -176,18 +180,6 @@ func buildSwitchSubMenus() {
 			sub.Uncheck()
 		}
 	}
-}
-
-func openCurrentAppDir() {
-	appPath, _ := command.GetCurrentAppPathArgs()
-	if appPath == "(未实现)" || appPath == "" {
-		return
-	}
-	dir := appPath
-	if idx := strings.LastIndexAny(appPath, "\\/"); idx > 0 {
-		dir = appPath[:idx]
-	}
-	exec.Command("explorer.exe", dir).Start()
 }
 
 func trayOnExit() {
