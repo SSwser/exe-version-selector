@@ -41,21 +41,21 @@ func KillProcessTree(pid int) error {
 // 推荐结合 IsProcessTreeAlive 检查进程树是否完全退出
 func KillProcessTreeAndWait(pid int) error {
 	err := KillProcessTree(pid)
-	if err == nil {
-		for i := 0; i < 50; i++ { // 最多等5秒
-			_, perr := os.FindProcess(pid)
-			if perr != nil {
-				break
-			}
-			if !IsProcessAlive(pid) {
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
+	if err != nil {
+		return err
 	}
-	return err
-}
 
+	for i := 0; i < 50; i++ { // 最多等5秒
+		if !IsProcessTreeAlive(pid) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if IsProcessTreeAlive(pid) {
+		return fmt.Errorf("进程树未完全退出")
+	}
+	return nil
+}
 
 // 启动应用进程并异步监控退出，所有状态通过回调返回
 func StartAppProcess(path string, args []string, onStatus func(status string, pid int, exitErr error)) (int, error) {
@@ -174,8 +174,8 @@ func CommandLineToArgv(cmd string) ([]string, error) {
 
 // FindAllDescendantPids 递归查找所有子进程 PID（含自身）
 type wmiProcTree struct {
-	ProcessId       uint32  `wmi:"ProcessId"`
-	ParentProcessId uint32  `wmi:"ParentProcessId"`
+	ProcessId       uint32 `wmi:"ProcessId"`
+	ParentProcessId uint32 `wmi:"ParentProcessId"`
 }
 
 func FindAllDescendantPids(rootPid int) []int {
