@@ -15,9 +15,25 @@ import (
 	"github.com/SSwser/exe-version-selector/internal"
 )
 
+var localSocketAddr = "127.0.0.1:50505"
+
+// Ping checks if the socket server is reachable.
+// Returns (ok, timeout): ok=true 表示连接成功，timeout=true 表示超时未响应，二者都为 false 表示连接被拒绝或其它错误。
+func Ping() (ok bool, timeout bool) {
+	conn, err := net.DialTimeout("tcp", localSocketAddr, 300*time.Millisecond)
+	if err == nil {
+		conn.Close()
+		return true, false
+	}
+	if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
+		return false, true
+	}
+	return false, false
+}
+
 // SendCommand sends a line command to the socket server and returns trimmed response.
 func SendCommand(cmd string) (string, error) {
-	conn, err := net.Dial("tcp", "127.0.0.1:50505")
+	conn, err := net.Dial("tcp", localSocketAddr)
 	if err != nil {
 		return "", err
 	}

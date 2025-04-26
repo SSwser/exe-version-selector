@@ -31,12 +31,18 @@ func trayOnReady() {
 	// 菜单分组配置（全部声明式）
 	menuConfig := []internal.MenuItemData{
 		{
-			Title:     "未连接",
-			Tooltip:   "应用运行状态",
-			Disable:   true,
+			Title:     "[未连接]",
+			Tooltip:   "与 EVS core 的 socket 连接状态",
 			Separator: true,
 			OnRefresh: func(item *systray.MenuItem) {
-				item.SetTitle("[状态] " + command.GetAppStatus().String())
+				ok, timeout := command.Ping()
+				if ok {
+					item.SetTitle("[已连接]")
+				} else if timeout {
+					item.SetTitle("[连接超时]")
+				} else {
+					item.SetTitle("[未连接]")
+				}
 			},
 		},
 		{
@@ -45,6 +51,14 @@ func trayOnReady() {
 			Disable: true,
 			OnRefresh: func(item *systray.MenuItem) {
 				item.SetTitle("应用: " + command.GetActivate())
+			},
+		},
+		{
+			Title:   "状态：",
+			Tooltip: "应用运行状态",
+			Disable: true,
+			OnRefresh: func(item *systray.MenuItem) {
+				item.SetTitle("状态: " + command.GetAppStatus().String())
 			},
 		},
 		{
