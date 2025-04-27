@@ -29,10 +29,11 @@ import (
 )
 
 var configPath = "config.yaml" // 全局可用
-var appStatus = "未启动"
 var extraArgs []string
 var lastFoundArgs []string // 仅记录 FindProcessByPath 找到的参数（不含exe路径）
 var currentAppPid int
+
+var appStatus = internal.NewAppStatus(internal.AppNotStarted, 0, 0, "初始状态")
 
 var (
 	idleTimer  *time.Timer
@@ -70,14 +71,6 @@ func internalGetConfig() (*internal.Config, error) {
 		return nil, fmt.Errorf("ERR config not loaded")
 	}
 	return cfg, nil
-}
-
-func internalGetAppStatus() string {
-	// 用 FindProcessByPath 判断真实运行状态
-	// if pid, _, found := internal.FindProcessByPath(app.Path); found && pid != 0 {
-	// 	return internal.AppRunning.String()
-	// }
-	return fmt.Sprintf("%s", appStatus)
 }
 
 func internalGetActivate() string {
@@ -148,10 +141,10 @@ func internalKillCurrentApp() error {
 	}
 	err := internal.KillProcessTreeAndWait(currentAppPid)
 	if err == nil {
-		appStatus = "已终止 (PID=" + fmt.Sprint(currentAppPid) + ")"
+		appStatus = internal.NewAppStatus(internal.AppExited, currentAppPid, 0, "已终止")
 		setCurrentAppPid(0)
 	} else {
-		appStatus = "终止失败 (PID=" + fmt.Sprint(currentAppPid) + ")"
+		appStatus = internal.NewAppStatus(internal.AppExited, currentAppPid, 0, "终止失败")
 	}
 	return err
 }
@@ -187,34 +180,54 @@ func runAppProxy(args []string) {
 	fmt.Printf("[DEBUG] finalArgs: %v\n", finalArgs)
 
 	_, err = internal.StartAppProcess(app.Path, finalArgs, func(status string, pid int, exitErr error) {
+		exitCode := 0
+		if exitErr != nil {
+			if c, ok := internal.ExtractExitCode(exitErr); ok {
+				exitCode = c
+			}
+		}
+
 		switch status {
+		case "start_failed":
+			appStatus = internal.NewAppStatus(internal.AppExited, 0, exitCode, "启动失败")
+			fmt.Printf("启动应用失败: %v\n", exitErr)
 		case "running":
-			appStatus = fmt.Sprintf("运行中 (PID=%d)", pid)
 			setCurrentAppPid(pid)
+			appStatus = internal.NewAppStatus(internal.AppRunning, pid, 0, "运行中")
 			fmt.Printf("已启动应用: %s (PID=%d)\n", app.Path, pid)
 		case "exited":
-			appStatus = fmt.Sprintf("已退出 (PID=%d)", pid)
+			setCurrentAppPid(0)
+			appStatus = internal.NewAppStatus(internal.AppExited, pid, exitCode, "已退出")
 			fmt.Println("应用已正常退出")
-			setCurrentAppPid(0)
 		case "exit_failed":
-			appStatus = fmt.Sprintf("异常退出 (PID=%d)", pid)
+			setCurrentAppPid(0)
+			code := 1
+			if exitCode != 0 {
+				code = exitCode
+			}
+			appStatus = internal.NewAppStatus(internal.AppExited, pid, code, "异常退出")
 			fmt.Printf("应用异常退出，返回码非0: %v\n", exitErr)
-			setCurrentAppPid(0)
 		case "killed":
-			appStatus = fmt.Sprintf("被终止 (PID=%d)", pid)
+			setCurrentAppPid(0)
+			code := 1
+			if exitCode != 0 {
+				code = exitCode
+			}
+			appStatus = internal.NewAppStatus(internal.AppExited, pid, code, "被终止")
 			fmt.Printf("应用被信号终止: %v\n", exitErr)
-			setCurrentAppPid(0)
 		case "crashed":
-			appStatus = fmt.Sprintf("已崩溃 (PID=%d)", pid)
-			fmt.Printf("应用崩溃: %v\n", exitErr)
 			setCurrentAppPid(0)
-		case "start_failed":
-			appStatus = "启动失败"
-			fmt.Printf("启动应用失败: %v\n", exitErr)
+			code := 1
+			if exitCode != 0 {
+				code = exitCode
+			}
+			appStatus = internal.NewAppStatus(internal.AppCrashed, pid, code, "已崩溃")
+			fmt.Printf("应用崩溃: %v\n", exitErr)
 		}
 	})
+
 	if err != nil {
-		appStatus = "启动失败"
+		appStatus = internal.NewAppStatus(internal.AppExited, 0, 0, "启动失败")
 		fmt.Printf("启动应用失败: %v\n", err)
 		return
 	}
@@ -263,7 +276,14 @@ func handleConsoleConn(conn net.Conn, configPath string) {
 	case "activate":
 		conn.Write([]byte(internalGetActivate()))
 	case "status":
-		conn.Write([]byte(internalGetAppStatus()))
+		conn.Write(
+			// 返回详细状态字符串
+			fmt.Appendf(nil, "%s | PID=%d | ExitCode=%d",
+				appStatus.Main.String(),
+				appStatus.Pid,
+				appStatus.ExitCode,
+			),
+		)
 	case "list":
 		cfg, err := internalGetConfig()
 		if err != nil {
@@ -378,7 +398,7 @@ func main() {
 		// 通过进程路径查找是否有已运行实例
 		if pid, args, found := internal.FindProcessByPath(appPath); found {
 			shouldStart = false
-			appStatus = fmt.Sprintf("运行中 (PID=%d)", pid)
+			appStatus = internal.NewAppStatus(internal.AppRunning, pid, 0, "运行中")
 			fmt.Printf("[DEBUG] FindProcessByPath 原始args: %v\n", args)
 			if len(args) > 1 {
 				fmt.Printf("[DEBUG] FindProcessByPath 参数部分: %v\n", args[1:])

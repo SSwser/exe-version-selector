@@ -72,12 +72,12 @@ func GetActivate() string {
 }
 
 // GetAppStatus returns AppStatus from "status".
-func GetAppStatus() internal.AppStatus {
+func GetAppStatus() string {
 	resp, err := SendCommand("status")
 	if err != nil {
-		return internal.AppUnknown
+		return internal.AppUnknown.String()
 	}
-	return internal.ParseAppStatus(resp)
+	return resp
 }
 
 // GetAppInfo 获取应用信息，name 为空则为当前激活 app，否则为指定 app。

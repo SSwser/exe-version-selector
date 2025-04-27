@@ -46,19 +46,19 @@ func trayOnReady() {
 			},
 		},
 		{
+			Title:   "状态：",
+			Tooltip: "应用运行状态",
+			Disable: true,
+			OnRefresh: func(item *systray.MenuItem) {
+				item.SetTitle("状态: " + command.GetAppStatus())
+			},
+		},
+		{
 			Title:   "应用: ",
 			Tooltip: "当前运行的应用",
 			Disable: true,
 			OnRefresh: func(item *systray.MenuItem) {
 				item.SetTitle("应用: " + command.GetActivate())
-			},
-		},
-		{
-			Title:   "状态：",
-			Tooltip: "应用运行状态",
-			Disable: true,
-			OnRefresh: func(item *systray.MenuItem) {
-				item.SetTitle("状态: " + command.GetAppStatus().String())
 			},
 		},
 		{
@@ -99,7 +99,7 @@ func trayOnReady() {
 			Title:   "启动 / 重启",
 			Tooltip: "运行或重启当前激活的应用",
 			OnClick: func(item *systray.MenuItem) {
-				status := command.GetAppStatus()
+				status := internal.ParseAppStatus(command.GetAppStatus())
 				if status == internal.AppRunning {
 					command.RestartApp()
 				} else {

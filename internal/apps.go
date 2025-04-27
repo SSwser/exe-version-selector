@@ -3,48 +3,69 @@ package internal
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // AppStatus 表示应用运行状态，用于托盘菜单、主程序等统一判断
-type AppStatus int
+type AppMainStatus int
 
 const (
-	AppUnknown AppStatus = iota
-	AppRunning
-	AppStopped
-	AppExited
-	AppCrashed
+	AppNotStarted AppMainStatus = iota // 未启动
+	AppRunning                         // 运行中
+	AppExited                          // 已退出
+	AppCrashed                         // 已崩溃
+	AppUnknown                         // 未知
 )
 
-func (a AppStatus) String() string {
-	// 与 ParseAppStatus 的判定顺序保持一致
-	switch a {
+func (s AppMainStatus) String() string {
+	switch s {
+	case AppNotStarted:
+		return "未启动"
 	case AppRunning:
 		return "运行中"
-	case AppStopped:
-		return "未启动"
 	case AppExited:
 		return "已退出"
 	case AppCrashed:
 		return "已崩溃"
 	case AppUnknown:
-		fallthrough
+		return "未知"
 	default:
 		return "未知"
 	}
 }
 
-// ParseAppStatus 从描述字符串解析为 AppStatus 枚举
-func ParseAppStatus(status string) AppStatus {
+type AppStatus struct {
+	Main      AppMainStatus // 主状态
+	Pid       int           // 进程PID
+	ExitCode  int           // 退出码
+	Detail    string        // 详细描述
+	Timestamp time.Time     // 状态变更时间
+}
+
+// NewAppStatus 构建带当前时间戳的 AppStatus
+func NewAppStatus(main AppMainStatus, pid, exitCode int, detail string) AppStatus {
+	return AppStatus{
+		Main:      main,
+		Pid:       pid,
+		ExitCode:  exitCode,
+		Detail:    detail,
+		Timestamp: time.Now(),
+	}
+}
+
+// ParseAppStatus 从描述字符串解析为 AppMainStatus 枚举
+func ParseAppStatus(status string) AppMainStatus {
 	switch {
 	case strings.Contains(status, "未启动"):
-		return AppStopped
+		return AppNotStarted
 	case strings.Contains(status, "已退出"):
 		return AppExited
 	case strings.Contains(status, "已崩溃"):
 		return AppCrashed
 	case strings.Contains(status, "运行中"):
 		return AppRunning
+	case strings.Contains(status, "未知"):
+		return AppUnknown
 	default:
 		return AppUnknown
 	}

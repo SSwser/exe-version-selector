@@ -13,6 +13,24 @@ import (
 	"github.com/StackExchange/wmi"
 )
 
+// ExtractExitCode 提取 error 中的退出码（如有），否则返回 false
+func ExtractExitCode(err error) (int, bool) {
+	if err == nil {
+		return 0, false
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		// 优先使用 Go1.12+ ExitCode()
+		if code := exitErr.ExitCode(); code != -1 {
+			return code, true
+		}
+		// 尝试 syscall.WaitStatus
+		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
+			return status.ExitStatus(), true
+		}
+	}
+	return 0, false
+}
+
 // 检查进程是否存活（windows 适用）
 func IsProcessAlive(pid int) bool {
 	if pid == 0 {
