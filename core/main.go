@@ -30,9 +30,39 @@ import (
 
 var configPath = "config.yaml" // 全局可用
 var appStatus = "未启动"
-var currentAppPid int
 var extraArgs []string
 var lastFoundArgs []string // 仅记录 FindProcessByPath 找到的参数（不含exe路径）
+var currentAppPid int
+
+var (
+	idleTimer  *time.Timer
+	idleTimerC <-chan time.Time
+)
+
+func setCurrentAppPid(pid int) {
+	currentAppPid = pid
+	if pid == 0 {
+		if idleTimer == nil {
+			idleTimer = time.NewTimer(2 * time.Minute)
+			idleTimerC = idleTimer.C
+			go func() {
+				<-idleTimerC
+				if currentAppPid == 0 {
+					fmt.Println("[evs] 2分钟无应用运行，自动退出")
+					os.Exit(0)
+				}
+			}()
+		}
+	} else {
+		if idleTimer != nil {
+			if !idleTimer.Stop() {
+				<-idleTimer.C // drain
+			}
+			idleTimer = nil
+			idleTimerC = nil
+		}
+	}
+}
 
 func internalGetConfig() (*internal.Config, error) {
 	cfg := internal.GetConfig()
@@ -119,10 +149,10 @@ func internalKillCurrentApp() error {
 	err := internal.KillProcessTreeAndWait(currentAppPid)
 	if err == nil {
 		appStatus = "已终止 (PID=" + fmt.Sprint(currentAppPid) + ")"
+		setCurrentAppPid(0)
 	} else {
 		appStatus = "终止失败 (PID=" + fmt.Sprint(currentAppPid) + ")"
 	}
-	currentAppPid = 0
 	return err
 }
 
@@ -160,24 +190,24 @@ func runAppProxy(args []string) {
 		switch status {
 		case "running":
 			appStatus = fmt.Sprintf("运行中 (PID=%d)", pid)
-			currentAppPid = pid
+			setCurrentAppPid(pid)
 			fmt.Printf("已启动应用: %s (PID=%d)\n", app.Path, pid)
 		case "exited":
 			appStatus = fmt.Sprintf("已退出 (PID=%d)", pid)
 			fmt.Println("应用已正常退出")
-			currentAppPid = 0
+			setCurrentAppPid(0)
 		case "exit_failed":
 			appStatus = fmt.Sprintf("异常退出 (PID=%d)", pid)
 			fmt.Printf("应用异常退出，返回码非0: %v\n", exitErr)
-			currentAppPid = 0
+			setCurrentAppPid(0)
 		case "killed":
 			appStatus = fmt.Sprintf("被终止 (PID=%d)", pid)
 			fmt.Printf("应用被信号终止: %v\n", exitErr)
-			currentAppPid = 0
+			setCurrentAppPid(0)
 		case "crashed":
 			appStatus = fmt.Sprintf("已崩溃 (PID=%d)", pid)
 			fmt.Printf("应用崩溃: %v\n", exitErr)
-			currentAppPid = 0
+			setCurrentAppPid(0)
 		case "start_failed":
 			appStatus = "启动失败"
 			fmt.Printf("启动应用失败: %v\n", exitErr)
@@ -299,7 +329,7 @@ func handleConsoleConn(conn net.Conn, configPath string) {
 	case "exit":
 		if currentAppPid != 0 {
 			_ = internalKillCurrentApp()
-			currentAppPid = 0
+			setCurrentAppPid(0)
 		}
 		conn.Write([]byte("OK\n"))
 		time.Sleep(50 * time.Millisecond)
@@ -358,14 +388,14 @@ func main() {
 				lastFoundArgs = nil
 			}
 			fmt.Printf("[DEBUG] lastFoundArgs 赋值后: %v\n", lastFoundArgs)
-			currentAppPid = pid
+			setCurrentAppPid(pid)
 		}
 
 		if shouldStart {
 			go runAppProxy(nil)
 		}
 
-		// 启动 socket 服务
+		// 启动 soc
 		startConsoleServer(configPath)
 	}
 }

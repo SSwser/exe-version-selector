@@ -1,8 +1,6 @@
 package internal
 
 import (
-	"fmt"
-	"os"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -68,39 +66,18 @@ func CreateMenuFromConfig(cfg MenuItemData) *MenuEntry {
 }
 
 // 递归刷新所有菜单项的 OnRefresh
-func RefreshAllMenuItems() {
-	for _, entry := range RootMenuEntries {
-		refreshEntry(entry)
-	}
-}
-
-func refreshEntry(entry *MenuEntry) {
+func internalRefreshEntry(entry *MenuEntry) {
 	if entry.Config.OnRefresh != nil {
 		entry.Config.OnRefresh(entry.Item)
 	}
 	for _, sub := range entry.Subs {
-		refreshEntry(sub)
+		internalRefreshEntry(sub)
 	}
 }
 
-// 子菜单递归辅助
-func CreateMenuFromConfigRecursive(parent *systray.MenuItem, data MenuItemData) {
-	for _, sub := range data.SubMenus {
-		subItem := parent.AddSubMenuItem(sub.Title, sub.Tooltip)
-		if sub.OnClick != nil {
-			go func(s *systray.MenuItem, handler func(*systray.MenuItem)) {
-				for {
-					<-s.ClickedCh
-					handler(s)
-				}
-			}(subItem, sub.OnClick)
-		}
-		if len(sub.SubMenus) > 0 {
-			CreateMenuFromConfigRecursive(subItem, sub)
-		}
-		if sub.Separator {
-			systray.AddSeparator()
-		}
+func RefreshAllMenuItems() {
+	for _, entry := range RootMenuEntries {
+		internalRefreshEntry(entry)
 	}
 }
 
@@ -114,9 +91,9 @@ func StartMenuRefresher() {
 			for _, f := range menuRefreshers {
 				f()
 			}
-			// 新增：每秒统一刷新所有菜单项
-			RefreshAllMenuItems()
-			time.Sleep(time.Second)
+
+			RefreshAllMenuItems() // 统一刷新所有菜单项
+			time.Sleep(time.Second * 2)
 		}
 	}()
 }
@@ -127,9 +104,4 @@ func UpdateTrayTitle(current string) {
 	// Windows 下频繁 SetTooltip 可能报错，可选择注释掉或捕获异常
 	defer func() { _ = recover() }()
 	// systray.SetTooltip("当前应用: " + current) // 避免 Windows 报错
-}
-
-// 显示错误信息
-func ShowError(msg string) {
-	fmt.Fprintf(os.Stderr, "[错误] %s\n", msg)
 }
